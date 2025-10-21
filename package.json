@@ -1,4 +1,22 @@
 {
+  "name": "axios-api-testing",
+  "version": "1.0.0",
+  "description": "API Testing Automation with Axios and comprehensive reporting",
+  "main": "demo-qa.js",
+  "scripts": {
+    "test": "node demo-qa.js",
+    "example": "node example.js",
+    "clean": "rm -rf automation-reports/*.json test-report-*.json"
+  },
+  "keywords": [
+    "axios",
+    "api-testing",
+    "automation",
+    "testing",
+    "qa"
+  ],
+  "author": "",
+  "license": "MIT",
   "dependencies": {
     "axios": "^1.11.0"
   }

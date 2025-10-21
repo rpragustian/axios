@@ -1,0 +1,120 @@
+name: API Test Suite
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Run API Tests
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm install
+    
+    - name: Create automation-reports directory
+      run: mkdir -p automation-reports
+    
+    - name: Run API examples
+      run: node example.js
+      continue-on-error: true
+    
+    - name: Run DemoQA test suite
+      id: tests
+      run: node demo-qa.js
+      continue-on-error: true
+    
+    - name: Upload test reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-reports-node-${{ matrix.node-version }}
+        path: |
+          test-report-*.json
+          automation-reports/
+        retention-days: 30
+    
+    - name: Check test results
+      if: steps.tests.outcome == 'failure'
+      run: |
+        echo "Tests failed. Check the test reports for details."
+        exit 1
+    
+    - name: Display test summary
+      if: always()
+      run: |
+        if [ -f test-report-*.json ]; then
+          echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          latest_report=$(ls -t test-report-*.json | head -1)
+          echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+          cat "$latest_report" | jq '.summary' >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        fi
+
+  report:
+    name: Comment Test Results
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'pull_request' && failure()
+    
+    steps:
+    - name: Download test reports
+      uses: actions/download-artifact@v4
+      with:
+        pattern: test-reports-*
+        merge-multiple: true
+    
+    - name: Comment PR
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const fs = require('fs');
+          const files = fs.readdirSync('.').filter(f => f.startsWith('test-report-'));
+          
+          if (files.length > 0) {
+            const report = JSON.parse(fs.readFileSync(files[0], 'utf8'));
+            const summary = report.summary;
+            
+            let comment = `## 🧪 API Test Results\n\n`;
+            comment += `**Status:** ${summary.finalResult === 'ALL TESTS PASSED' ? '✅ PASSED' : '❌ FAILED'}\n\n`;
+            comment += `| Metric | Value |\n`;
+            comment += `|--------|-------|\n`;
+            comment += `| Total Tests | ${summary.totalTests} |\n`;
+            comment += `| Passed | ✅ ${summary.passedTests} |\n`;
+            comment += `| Failed | ❌ ${summary.failedTests} |\n`;
+            comment += `| Success Rate | ${summary.successRate} |\n`;
+            comment += `| Execution Time | ${summary.executionTime} |\n\n`;
+            
+            if (report.errors && report.errors.length > 0) {
+              comment += `### Failed Tests\n\n`;
+              report.errors.forEach(error => {
+                comment += `- **${error.testName}**: ${error.error}\n`;
+              });
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+          }
+
